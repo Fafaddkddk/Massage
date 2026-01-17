@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Octypi Messenger</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        :root { --blue: #0088cc; --dark: #0e1621; --chat: #17212b; --header: #242f3d; --accent: #40a7e3; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body { height: 100%; margin: 0; padding: 0; background: var(--dark); color: white; font-family: -apple-system, blinkmacsystemfont, sans-serif; overflow: hidden; }
+        
+        .container { display: flex; flex-direction: column; height: 100%; width: 100%; max-width: 500px; margin: 0 auto; background: var(--chat); position: relative; }
+        .screen { display: none; flex-direction: column; height: 100%; width: 100%; animation: fadeIn 0.2s; }
+        .active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* HEADER */
+        header { background: var(--header); padding: 10px 15px; display: flex; align-items: center; height: 55px; flex-shrink: 0; z-index: 10; }
+        .header-title { flex: 1; margin-left: 15px; font-weight: bold; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* СПИСОК ЧАТОВ */
+        .list-item { padding: 12px 15px; border-bottom: 1px solid rgba(0,0,0,0.1); display: flex; align-items: center; cursor: pointer; }
+        .list-item:active { background: rgba(255,255,255,0.05); }
+        .ava-circle { width: 48px; height: 48px; border-radius: 50%; background: #2b5278; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-right: 15px; flex-shrink: 0; font-size: 20px; }
+        .ava-circle img { width: 100%; height: 100%; object-fit: cover; }
+
+        /* СООБЩЕНИЯ */
+        #messages { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 8px; background: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); background-attachment: fixed; }
+        .msg { padding: 8px 14px; border-radius: 16px; max-width: 80%; font-size: 15px; position: relative; line-height: 1.4; box-shadow: 0 1px 1px rgba(0,0,0,0.2); }
+        .my-msg { align-self: flex-end; background: #2b5278; border-bottom-right-radius: 4px; }
+        .their-msg { align-self: flex-start; background: #182533; border-bottom-left-radius: 4px; }
+        .sender-name { font-size: 12px; font-weight: bold; color: var(--accent); margin-bottom: 2px; }
+
+        /* УПРАВЛЕНИЕ */
+        .controls { background: var(--header); display: flex; padding: 10px; gap: 10px; align-items: center; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+        input { flex: 1; padding: 10px 16px; border-radius: 20px; border: none; background: #17212b; color: white; outline: none; font-size: 16px; }
+        .btn-round { width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--accent); color: white; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+
+        /* TG CALL UI */
+        #call-ui { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #1c242d; z-index: 9999; display: none; flex-direction: column; align-items: center; justify-content: space-between; padding: 80px 0; color: white; }
+        .call-bg-blur { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(to bottom, rgba(28,36,45,0.7), #1c242d); backdrop-filter: blur(20px); z-index: -1; }
+        #remote-video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2; }
+        #local-video { width: 90px; height: 130px; position: absolute; top: 30px; right: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.3); object-fit: cover; z-index: 10; background: #000; }
+        .call-info { text-align: center; }
+        .call-avatar { width: 130px; height: 130px; border-radius: 50%; background: var(--accent); margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; font-size: 50px; overflow: hidden; box-shadow: 0 0 40px rgba(0,0,0,0.4); }
+        .call-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .call-btns { display: flex; gap: 40px; }
+        .c-btn { width: 72px; height: 72px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; font-size: 30px; cursor: pointer; }
+        .c-accept { background: #4cd964; }
+        .c-decline { background: #ff3b30; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="call-ui">
+        <div class="call-bg-blur"></div>
+        <video id="remote-video" autoplay playsinline></video>
+        <video id="local-video" autoplay muted playsinline></video>
+        <div class="call-info">
+            <div class="call-avatar" id="call-ava-box">
+                <span id="call-icon">👤</span>
+                <img id="call-img" style="display:none">
+            </div>
+            <h2 id="call-name" style="margin:0">Octypi Call</h2>
+            <div id="call-status" style="opacity:0.7; margin-top:8px;">Звонок...</div>
+        </div>
+        <div class="call-btns">
+            <button id="btn-accept" class="c-btn c-accept" onclick="answerCall()">📞</button>
+            <button class="c-btn c-decline" onclick="endCall()">✖</button>
+        </div>
+    </div>
+
+    <div id="auth-screen" class="screen active">
+        <header><div class="header-title">🐙 Octypi Messenger</div></header>
+        <div style="padding: 30px 20px; display: flex; flex-direction: column; gap: 15px;">
+            <input type="text" id="reg-name" placeholder="Придумайте никнейм">
+            <input type="email" id="reg-email" placeholder="Email">
+            <input type="password" id="reg-pass" placeholder="Пароль">
+            <button onclick="handleAuth()" style="background:var(--accent); color:white; padding:16px; border:none; border-radius:12px; font-weight:bold; cursor:pointer;">ВОЙТИ / СОЗДАТЬ</button>
+        </div>
+    </div>
+
+    <div id="list-screen" class="screen">
+        <header>
+            <div id="my-ava-top" class="ava-circle" style="width:34px; height:34px; margin:0;" onclick="switchScreen('settings-screen')">👤</div>
+            <div class="header-title">Octypi</div>
+            <button onclick="switchScreen('settings-screen')" style="background:none; border:none; color:white; font-size:20px;">⚙️</button>
+        </header>
+        <div style="padding: 10px; display: flex; gap: 8px; background: var(--header);">
+            <input type="text" id="search-nick" placeholder="Поиск ника...">
+            <button onclick="findChat()" class="btn-round">+</button>
+        </div>
+        <div id="chats-list" style="flex:1; overflow-y:auto;"></div>
+    </div>
+
+    <div id="settings-screen" class="screen">
+        <header>
+            <button onclick="switchScreen('list-screen')" style="background:none; border:none; color:white; font-size:24px;">‹</button>
+            <div class="header-title">Профиль</div>
+        </header>
+        <div style="padding: 20px; text-align: center;">
+            <div class="call-avatar" style="cursor:pointer" onclick="document.getElementById('ava-input').click()">
+                <span id="set-ava-icon">👤</span>
+                <img id="set-ava-img" style="display:none">
+                <input type="file" id="ava-input" hidden accept="image/*">
+            </div>
+            <p style="color:var(--accent)">Нажмите, чтобы изменить фото</p>
+            <input type="text" id="set-name" style="width:100%; margin-top:20px;" placeholder="Ваше имя">
+            <button onclick="updateProfile()" style="width:100%; background:var(--accent); color:white; border:none; padding:14px; border-radius:10px; margin-top:15px; font-weight:bold;">СОХРАНИТЬ</button>
+            <button onclick="createGroup()" style="width:100%; background:#4caf50; color:white; border:none; padding:14px; border-radius:10px; margin-top:10px; font-weight:bold;">СОЗДАТЬ ГРУППУ 👥</button>
+        </div>
+    </div>
+
+    <div id="chat-screen" class="screen">
+        <header>
+            <button onclick="switchScreen('list-screen')" style="background:none; border:none; color:white; font-size:24px;">‹</button>
+            <div class="header-title" id="chat-name">Чат</div>
+            <button id="call-btn" onclick="startCall()" style="background:none; border:none; color:var(--accent); font-size:22px;">📞</button>
+            <button id="add-btn" onclick="addMember()" style="display:none; background:none; border:none; color:var(--accent); font-size:24px;">👤+</button>
+        </header>
+        <div id="messages"></div>
+        <div class="controls">
+            <input type="text" id="msg-input" placeholder="Сообщение">
+            <button onclick="send()" class="btn-round">➤</button>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+    import { getDatabase, ref, set, push, onChildAdded, get, onValue, update, off } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyCwLz3aRXoXlg6r9wUiMdwe648ueO9KqPg",
+        authDomain: "superchat-8df25.firebaseapp.com",
+        databaseURL: "https://superchat-8df25-default-rtdb.firebaseio.com",
+        projectId: "superchat-8df25"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getDatabase(app);
+
+    let me = null, activeChatId = null, isGroup = false, peer = null, myStream = null, currentCall = null;
+
+    // AUTH
+    window.handleAuth = async () => {
+        const e = document.getElementById('reg-email').value, p = document.getElementById('reg-pass').value, n = document.getElementById('reg-name').value;
+        try { await signInWithEmailAndPassword(auth, e, p); } catch {
+            const r = await createUserWithEmailAndPassword(auth, e, p);
+            await set(ref(db, 'users/' + r.user.uid), { name: n, uid: r.user.uid, avatar: "" });
+            await set(ref(db, 'usernames/' + n), r.user.uid);
+        }
+    };
+
+    onAuthStateChanged(auth, async (u) => {
+        if (u) {
+            const s = await get(ref(db, 'users/' + u.uid));
+            me = { uid: u.uid, ...s.val() };
+            
+            peer = new Peer(me.uid);
+            peer.on('call', async (call) => {
+                currentCall = call;
+                const snap = await get(ref(db, 'users/' + call.peer));
+                const ud = snap.val();
+                document.getElementById('call-name').innerText = ud.name;
+                if(ud.avatar) { document.getElementById('call-img').src = ud.avatar; document.getElementById('call-img').style.display = 'block'; document.getElementById('call-icon').style.display = 'none'; }
+                document.getElementById('call-ui').style.display = 'flex';
+                document.getElementById('btn-accept').style.display = 'flex';
+                document.getElementById('call-status').innerText = "Входящий вызов...";
+            });
+
+            if(me.avatar) {
+                document.getElementById('set-ava-img').src = me.avatar; document.getElementById('set-ava-img').style.display = 'block';
+                document.getElementById('set-ava-icon').style.display = 'none';
+                document.getElementById('my-ava-top').innerHTML = `<img src="${me.avatar}">`;
+            }
+            document.getElementById('set-name').value = me.name;
+            loadChats(); switchScreen('list-screen');
+        }
+    });
+
+    // CALLS
+    window.startCall = async () => {
+        const otherId = activeChatId.replace(me.uid, "").replace("_", "");
+        const s = await get(ref(db, 'users/' + otherId));
+        const ud = s.val();
+        document.getElementById('call-name').innerText = ud.name;
+        if(ud.avatar) { document.getElementById('call-img').src = ud.avatar; document.getElementById('call-img').style.display = 'block'; document.getElementById('call-icon').style.display = 'none'; }
+        
+        try {
+            myStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+            document.getElementById('local-video').srcObject = myStream;
+            document.getElementById('call-ui').style.display = 'flex';
+            document.getElementById('btn-accept').style.display = 'none';
+            document.getElementById('call-status').innerText = "Вызов...";
+            const call = peer.call(otherId, myStream);
+            call.on('stream', rs => document.getElementById('remote-video').srcObject = rs);
+            currentCall = call;
+        } catch { alert("Нет доступа к камере"); }
+    };
+
+    window.answerCall = async () => {
+        myStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+        document.getElementById('local-video').srcObject = myStream;
+        currentCall.answer(myStream);
+        currentCall.on('stream', rs => document.getElementById('remote-video').srcObject = rs);
+        document.getElementById('btn-accept').style.display = 'none';
+        document.getElementById('call-status').innerText = "В разговоре";
+    };
+
+    window.endCall = () => { if(myStream) myStream.getTracks().forEach(t => t.stop()); location.reload(); };
+
+    // GROUP
+    window.createGroup = async () => {
+        const n = prompt("Имя группы:"); if(!n) return;
+        const gid = 'group_' + Date.now();
+        await set(ref(db, 'groups/' + gid), { name: n, owner: me.uid, members: {[me.uid]: true} });
+        await set(ref(db, 'chats/' + gid + '/info'), { name: n, type: 'group' });
+        switchScreen('list-screen');
+    };
+
+    window.addMember = async () => {
+        const nick = prompt("Ник друга:");
+        const s = await get(ref(db, 'usernames/' + nick));
+        if(s.exists()) { await update(ref(db, `groups/${activeChatId}/members`), {[s.val()]: true}); alert("Добавлен!"); }
+    };
+
+    // CHATS
+    function loadChats() {
+        onValue(ref(db, 'chats'), (snap) => {
+            const list = document.getElementById('chats-list'); list.innerHTML = "";
+            snap.forEach(c => {
+                const id = c.key;
+                if(id.includes(me.uid) || id.startsWith('group_')) renderChatItem(id, list);
+            });
+        });
+    }
+
+    async function renderChatItem(id, list) {
+        let name = "Чат", icon = "👤", isG = false, ava = "";
+        if(id.startsWith('group_')) {
+            const g = await get(ref(db, 'groups/' + id));
+            if(!g.exists() || !g.val().members[me.uid]) return;
+            name = g.val().name; icon = "👥"; isG = true;
+        } else {
+            const oid = id.replace(me.uid, "").replace("_", "");
+            const u = await get(ref(db, 'users/' + oid));
+            if(!u.exists()) return;
+            name = u.val().name; ava = u.val().avatar;
+        }
+        const d = document.createElement('div');
+        d.className = 'list-item';
+        d.innerHTML = `<div class="ava-circle">${ava ? `<img src="${ava}">` : icon}</div><span>${name}</span>`;
+        d.onclick = () => openChat(id, name, isG);
+        list.appendChild(d);
+    }
+
+    function openChat(id, name, isG) {
+        activeChatId = id; isGroup = isG;
+        document.getElementById('chat-name').innerText = name;
+        document.getElementById('call-btn').style.display = isG ? 'none' : 'block';
+        document.getElementById('add-btn').style.display = isG ? 'block' : 'none';
+        const box = document.getElementById('messages'); box.innerHTML = "";
+        const cRef = ref(db, 'chats/' + id); off(cRef);
+        onChildAdded(cRef, async (d) => {
+            if(d.key === 'info') return;
+            const m = d.val();
+            const div = document.createElement('div');
+            div.className = `msg ${m.sid === me.uid ? 'my-msg' : 'their-msg'}`;
+            if(isG && m.sid !== me.uid) {
+                const u = await get(ref(db, 'users/' + m.sid));
+                div.innerHTML = `<div class="sender-name">${u.val()?.name || 'User'}</div>` + m.txt;
+            } else div.innerText = m.txt;
+            box.appendChild(div); box.scrollTop = box.scrollHeight;
+        });
+        switchScreen('chat-screen');
+    }
+
+    window.send = () => {
+        const inp = document.getElementById('msg-input'); if(!inp.value.trim()) return;
+        push(ref(db, 'chats/' + activeChatId), { sid: me.uid, txt: inp.value });
+        inp.value = "";
+    };
+
+    window.findChat = async () => {
+        const nick = document.getElementById('search-nick').value.trim();
+        const s = await get(ref(db, 'usernames/' + nick));
+        if(s.exists()) {
+            const oid = s.val(); const id = me.uid < oid ? me.uid + "_" + oid : oid + "_" + me.uid;
+            const ud = await get(ref(db, 'users/' + oid)); openChat(id, ud.val().name, false);
+        } else alert("Не найден");
+    };
+
+    window.updateProfile = async () => {
+        await update(ref(db, 'users/' + me.uid), { name: document.getElementById('set-name').value });
+        alert("Обновлено!");
+    };
+
+    document.getElementById('ava-input').onchange = (e) => {
+        const r = new FileReader();
+        r.onload = async (ev) => { await update(ref(db, 'users/' + me.uid), { avatar: ev.target.result }); location.reload(); };
+        r.readAsDataURL(e.target.files[0]);
+    };
+
+    window.switchScreen = (id) => {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+    };
+</script>
+</body>
+</html>
+
